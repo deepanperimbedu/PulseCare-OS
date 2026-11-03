@@ -1,15 +1,48 @@
 import { ApiSuccess } from '@/types';
 
-function readEnv(name: keyof ImportMetaEnv): string {
-  const value = import.meta.env[name];
-  return typeof value === 'string' ? value.trim().replace(/\/$/, '') : '';
+/** Used only when VITE_API_BASE_URL is missing or is not an absolute http(s) URL. */
+const BACKEND_FALLBACK_ORIGIN = 'http://localhost:5000';
+
+function normalize(value: string | undefined): string {
+  return (value ?? '').trim().replace(/\/+$/, '');
 }
 
-const apiOrigin = readEnv('VITE_API_BASE_URL');
-const socketOrigin = readEnv('VITE_SOCKET_URL') || apiOrigin;
+function isAbsoluteHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function resolveApiOrigin(): string {
+  const configured = normalize(import.meta.env.VITE_API_BASE_URL);
+  if (isAbsoluteHttpUrl(configured)) return configured;
+
+  const reason = configured
+    ? `VITE_API_BASE_URL must be an absolute http(s) URL (received "${configured}")`
+    : 'VITE_API_BASE_URL is not set';
+  console.error(`[api] ${reason}. Requests will use ${BACKEND_FALLBACK_ORIGIN}.`);
+  return BACKEND_FALLBACK_ORIGIN;
+}
+
+function resolveSocketOrigin(apiOrigin: string): string {
+  const fromApi = apiOrigin.replace(/\/api\/?$/, '');
+  const configured = normalize(import.meta.env.VITE_SOCKET_URL);
+  if (!configured) return fromApi;
+  if (isAbsoluteHttpUrl(configured)) return configured.replace(/\/api\/?$/, '');
+
+  console.error(
+    `[api] VITE_SOCKET_URL must be an absolute http(s) URL (received "${configured}"). Using ${fromApi}.`,
+  );
+  return fromApi;
+}
+
+const apiOrigin = resolveApiOrigin();
 
 export const API_BASE_URL = apiOrigin.endsWith('/api') ? apiOrigin : `${apiOrigin}/api`;
-export const SOCKET_URL = socketOrigin.replace(/\/api\/?$/, '');
+export const SOCKET_URL = resolveSocketOrigin(apiOrigin);
 
 const TOKEN_KEY = 'pulsecare.token';
 
